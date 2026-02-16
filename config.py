@@ -1,9 +1,11 @@
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
-
-GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+# Prefer Streamlit secrets when running inside Streamlit; fall back to env var.
+try:
+    import streamlit as st
+    GOOGLE_MAPS_API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
+except Exception:
+    GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 
 # Controls stress avoidance strength
 LAMBDA = 3.0

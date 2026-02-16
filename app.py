@@ -1,7 +1,6 @@
-import os
-
 import streamlit as st
 
+from config import GOOGLE_MAPS_API_KEY
 from google_maps_client import build_shareable_directions_link, geocode, get_routes
 from route_selector import select_best_route
 from waypoint_planner import plan_relaxed_route_with_waypoints
@@ -63,9 +62,9 @@ def main():
     st.set_page_config(page_title="Biker relaxed routing", layout="centered")
     st.title("Biker Relaxed Routing")
 
-    api_key_present = bool(os.getenv("GOOGLE_MAPS_API_KEY"))
+    api_key_present = bool(GOOGLE_MAPS_API_KEY)
     if not api_key_present:
-        st.warning("GOOGLE_MAPS_API_KEY is not set. Add it to your .env file before running.")
+        st.warning("GOOGLE_MAPS_API_KEY is not set. Add it to Streamlit secrets or set the environment variable before running.")
 
     origin = st.text_input("Source (origin)", placeholder="e.g. Connaught Place, Delhi")
     destination = st.text_input("Destination", placeholder="e.g. India Gate, Delhi")
