@@ -2,7 +2,7 @@ import math
 
 from config import get_max_distance_ratio
 from google_maps_client import get_routes
-from route_selector import compute_stress, compute_cost
+from route_selector import compute_stress, _is_better
 
 
 def _bearing_deg(lat1, lng1, lat2, lng2):
@@ -99,18 +99,21 @@ def plan_relaxed_route_with_waypoints(
 
     def _best_under_limit(routes):
         best = None
-        best_cost = float("inf")
+        best_stress = float("inf")
+        best_distance = float("inf")
         for r in routes:
             if r["distance"] > max_allowed_distance:
                 continue
             stress = compute_stress(r["duration"], r["duration_in_traffic"])
-            cost = compute_cost(r["distance"], stress)
-            if cost < best_cost:
-                best_cost = cost
+            distance = r["distance"]
+            if _is_better(stress, distance, best_stress, best_distance):
+                best_stress = stress
+                best_distance = distance
                 best = {
                     **r,
                     "stress": stress,
-                    "cost": cost,
+                    # Keep the field name for UI compatibility.
+                    "cost": stress,
                 }
         return best
 
@@ -119,7 +122,7 @@ def plan_relaxed_route_with_waypoints(
         # If nothing fits the ratio, fall back to the shortest anyway.
         r = min(baseline_routes, key=lambda x: x["distance"])
         stress = compute_stress(r["duration"], r["duration_in_traffic"])
-        current_best = {**r, "stress": stress, "cost": compute_cost(r["distance"], stress)}
+        current_best = {**r, "stress": stress, "cost": stress}
 
     chosen_waypoints = []
     current_latlng = origin_latlng
@@ -148,7 +151,13 @@ def plan_relaxed_route_with_waypoints(
             if trial_best is None:
                 continue
 
-            if trial_best["cost"] < current_best["cost"]:
+            # Stress-first improvement; use distance as tie-breaker.
+            if _is_better(
+                trial_best["stress"],
+                trial_best["distance"],
+                current_best["stress"],
+                current_best["distance"],
+            ):
                 improved = True
                 current_best = trial_best
                 best_candidate = (lat, lng)

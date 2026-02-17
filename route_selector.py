@@ -1,10 +1,32 @@
-from config import LAMBDA, get_max_distance_ratio
+from config import get_max_distance_ratio
+
+
+# When comparing routes, we prioritize stress (a proxy for discomfort) and use distance
+# only as a tie-breaker among similarly-stressed routes.
+STRESS_EPSILON = 1e-3
 
 def compute_stress(duration, duration_in_traffic):
     return duration_in_traffic / duration
 
 def compute_cost(distance, stress):
-    return distance * (1 + LAMBDA * (stress - 1))
+    """Legacy helper.
+
+    Historically we used a distance-weighted cost. The project now selects routes
+    lexicographically by (stress, distance) under a max-distance constraint.
+
+    We keep this function for backward compatibility with any downstream imports.
+    """
+    return stress
+
+
+def _is_better(stress_a, distance_a, stress_b, distance_b, eps=STRESS_EPSILON):
+    """Return True if (a) is better than (b) using stress-first comparison."""
+
+    if stress_a < stress_b - eps:
+        return True
+    if abs(stress_a - stress_b) <= eps and distance_a < distance_b:
+        return True
+    return False
 
 def select_best_route(routes):
 
@@ -12,7 +34,8 @@ def select_best_route(routes):
     max_allowed_distance = shortest_distance * get_max_distance_ratio(shortest_distance / 1000.0)
 
     best_route = None
-    best_cost = float("inf")
+    best_stress = float("inf")
+    best_distance = float("inf")
 
     for route in routes:
 
@@ -26,13 +49,13 @@ def select_best_route(routes):
 
         stress = compute_stress(duration, duration_in_traffic)
 
-        cost = compute_cost(distance, stress)
-
+        # Expose values for UI/debugging.
         route["stress"] = stress
-        route["cost"] = cost
+        route["cost"] = stress  # kept for UI display; no longer distance-weighted
 
-        if cost < best_cost:
-            best_cost = cost
+        if _is_better(stress, distance, best_stress, best_distance):
+            best_stress = stress
+            best_distance = distance
             best_route = route
 
     return best_route
