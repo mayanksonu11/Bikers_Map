@@ -25,3 +25,6 @@ env/
 # OS / editor
 .DS_Store
 .vscode/
+
+# Logs
+logs/

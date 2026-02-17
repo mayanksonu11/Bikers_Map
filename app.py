@@ -1,9 +1,16 @@
 import streamlit as st
 
+from logging_config import configure_logging, safe_text
+
+import logging
+
 from config import GOOGLE_MAPS_API_KEY
 from google_maps_client import build_shareable_directions_link, geocode, get_routes
 from route_selector import select_best_route
 from waypoint_planner import plan_relaxed_route_with_waypoints
+
+
+logger = logging.getLogger(__name__)
 
 
 def _meters_to_km(m):
@@ -50,7 +57,7 @@ def _render_route(route: dict, origin: str, destination: str):
         origin=origin,
         destination=destination,
         waypoints=waypoints,
-        travelmode="bicycling",
+        travelmode="driving",
     )
 
     st.write("**Google Maps link (opens in browser / Maps app):**")
@@ -59,6 +66,7 @@ def _render_route(route: dict, origin: str, destination: str):
 
 
 def main():
+    configure_logging()
     st.set_page_config(page_title="Biker relaxed routing", layout="centered")
     st.title("Biker Relaxed Routing")
 
@@ -68,6 +76,8 @@ def main():
 
     origin = st.text_input("Source (origin)", placeholder="e.g. Connaught Place, Delhi")
     destination = st.text_input("Destination", placeholder="e.g. India Gate, Delhi")
+
+    logger.info("UI inputs updated origin=%s destination=%s", safe_text(origin), safe_text(destination))
 
     mode = st.radio(
         "Mode",
@@ -110,23 +120,33 @@ def main():
 
     try:
         if mode == "Normal":
-            routes = get_routes(origin, destination)
+            logger.info("Mode normal")
+            routes = get_routes(origin, destination, travelmode="driving")
             best_route = select_best_route(routes)
             if not best_route:
                 raise Exception("No route found")
 
         elif mode == "Manual waypoints":
+            logger.info("Mode manual waypoints")
             waypoints = _parse_waypoints_csv(manual_waypoints_raw)
-            routes = get_routes(origin, destination, waypoints=waypoints)
+            logger.info("Manual waypoints count=%s", 0 if not waypoints else len(waypoints))
+            routes = get_routes(origin, destination, waypoints=waypoints, travelmode="driving")
             best_route = select_best_route(routes)
             if not best_route:
                 raise Exception("No route found")
             best_route["waypoints"] = waypoints
 
         else:  # Auto (relaxed) waypoints
+            logger.info("Mode auto waypoints")
             with st.spinner("Geocoding origin/destination..."):
                 origin_latlng = geocode(origin)
                 destination_latlng = geocode(destination)
+
+            logger.info(
+                "Geocoded origin_latlng=%s destination_latlng=%s",
+                origin_latlng,
+                destination_latlng,
+            )
 
             with st.spinner("Searching for relaxed waypoints..."):
                 best_route = plan_relaxed_route_with_waypoints(
@@ -134,8 +154,16 @@ def main():
                     destination=destination,
                     origin_latlng=origin_latlng,
                     destination_latlng=destination_latlng,
+                    travelmode="driving",
                     **(auto_params or {}),
                 )
+
+            logger.info(
+                "Auto search done waypoints=%s distance_m=%s stress=%s",
+                0 if not best_route.get("waypoints") else len(best_route["waypoints"]),
+                best_route.get("distance"),
+                best_route.get("stress"),
+            )
 
             # Guardrail: Google Maps share URLs can get very long with many waypoints.
             # We warn, but still show the link.
@@ -145,6 +173,7 @@ def main():
         _render_route(best_route, origin=origin, destination=destination)
 
     except Exception as e:
+        logger.exception("Route generation failed")
         st.error(str(e))
 
 

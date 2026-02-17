@@ -1,9 +1,18 @@
+import logging
 import requests
 from urllib.parse import urlencode
 from config import GOOGLE_MAPS_API_KEY
 
+from logging_config import safe_text
+
+
+logger = logging.getLogger(__name__)
+
 BASE_URL = "https://maps.googleapis.com/maps/api/directions/json"
 GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
+
+
+SUPPORTED_TRAVEL_MODES = {"driving", "walking", "bicycling", "transit"}
 
 def _serialize_waypoints(waypoints, optimize_waypoints=False):
     """Serialize waypoints for Google Directions API.
@@ -46,15 +55,33 @@ def _sum_legs(legs):
     for leg in legs:
         distance += leg["distance"]["value"]
         duration += leg["duration"]["value"]
-        duration_in_traffic += leg.get("duration_in_traffic", leg["duration"])["value"]
+        dit = leg.get("duration_in_traffic")
+        if dit is None:
+            duration_in_traffic += leg["duration"]["value"]
+            logger.warning("Directions leg missing duration_in_traffic; using duration as fallback")
+        else:
+            duration_in_traffic += dit["value"]
 
     return distance, duration, duration_in_traffic
 
 
-def get_routes(origin, destination, waypoints=None, optimize_waypoints=False):
+def get_routes(origin, destination, waypoints=None, optimize_waypoints=False, travelmode: str = "driving"):
+    travelmode = (travelmode or "driving").lower().strip()
+    if travelmode not in SUPPORTED_TRAVEL_MODES:
+        raise ValueError(f"Unsupported travelmode: {travelmode}")
+
+    logger.info(
+        "Directions request mode=%s origin=%s destination=%s waypoints_count=%s optimize=%s",
+        travelmode,
+        safe_text(origin),
+        safe_text(destination),
+        0 if not waypoints else (len(waypoints.split("|")) if isinstance(waypoints, str) else len(waypoints)),
+        bool(optimize_waypoints),
+    )
     params = {
         "origin": origin,
         "destination": destination,
+        "mode": travelmode,
         "alternatives": "true",
         "departure_time": "now",
         "traffic_model": "best_guess",
@@ -66,6 +93,8 @@ def get_routes(origin, destination, waypoints=None, optimize_waypoints=False):
         params["waypoints"] = serialized_waypoints
 
     response = requests.get(BASE_URL, params=params)
+
+    logger.debug("Directions HTTP status=%s", response.status_code)
 
     if response.status_code != 200:
         raise Exception(f"API request failed: HTTP {response.status_code} - {response.text}")
@@ -93,11 +122,15 @@ def get_routes(origin, destination, waypoints=None, optimize_waypoints=False):
             "polyline": route["overview_polyline"]["points"]
         })
 
+    logger.info("Directions response routes=%s", len(routes))
+
     return routes
 
 
 def geocode(address):
     """Resolve a human-readable address/place into (lat, lng) using Google Geocoding API."""
+
+    logger.info("Geocode request address=%s", safe_text(address))
 
     params = {
         "address": address,
@@ -105,6 +138,7 @@ def geocode(address):
     }
 
     response = requests.get(GEOCODE_URL, params=params)
+    logger.debug("Geocode HTTP status=%s", response.status_code)
     if response.status_code != 200:
         raise Exception(f"Geocoding API request failed: HTTP {response.status_code} - {response.text}")
 
@@ -117,6 +151,7 @@ def geocode(address):
         raise Exception("Geocoding API returned no results")
 
     loc = results[0]["geometry"]["location"]
+    logger.info("Geocode response ok")
     return loc["lat"], loc["lng"]
 
 

@@ -1,9 +1,13 @@
+import logging
+
 from config import get_max_distance_ratio
 
 
 # When comparing routes, we prioritize stress (a proxy for discomfort) and use distance
 # only as a tie-breaker among similarly-stressed routes.
 STRESS_EPSILON = 1e-3
+
+logger = logging.getLogger(__name__)
 
 def compute_stress(duration, duration_in_traffic):
     return duration_in_traffic / duration
@@ -29,6 +33,8 @@ def _is_better(stress_a, distance_a, stress_b, distance_b, eps=STRESS_EPSILON):
     return False
 
 def select_best_route(routes):
+
+    logger.info("Selecting best route among candidates=%s", 0 if not routes else len(routes))
 
     shortest_distance = min(route["distance"] for route in routes)
     max_allowed_distance = shortest_distance * get_max_distance_ratio(shortest_distance / 1000.0)
@@ -57,5 +63,10 @@ def select_best_route(routes):
             best_stress = stress
             best_distance = distance
             best_route = route
+
+    if best_route is None:
+        logger.info("No route satisfied max distance constraint")
+    else:
+        logger.info("Selected route stress=%s distance_m=%s", best_route.get("stress"), best_route.get("distance"))
 
     return best_route

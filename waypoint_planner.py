@@ -1,8 +1,11 @@
+import logging
 import math
 
 from config import get_max_distance_ratio
 from google_maps_client import get_routes
 from route_selector import compute_stress, _is_better
+
+logger = logging.getLogger(__name__)
 
 
 def _bearing_deg(lat1, lng1, lat2, lng2):
@@ -70,6 +73,7 @@ def plan_relaxed_route_with_waypoints(
     destination,
     origin_latlng,
     destination_latlng,
+    travelmode: str = "driving",
     circle_radius_m=1000.0,
     candidates_per_step=12,
     heading_spread_deg=60.0,
@@ -90,12 +94,26 @@ def plan_relaxed_route_with_waypoints(
         call Geocoding API in this project.
     """
 
-    baseline_routes = get_routes(origin, destination)
+    logger.info(
+        "Auto waypoint planning start candidates_per_step=%s radius_m=%s spread_deg=%s max_waypoints=%s",
+        candidates_per_step,
+        circle_radius_m,
+        heading_spread_deg,
+        max_waypoints,
+    )
+
+    baseline_routes = get_routes(origin, destination, travelmode=travelmode)
     if not baseline_routes:
         raise Exception("No baseline routes returned by Directions API")
 
     shortest_distance = min(r["distance"] for r in baseline_routes)
     max_allowed_distance = shortest_distance * get_max_distance_ratio(shortest_distance / 1000.0)
+
+    logger.info(
+        "Distance constraint shortest_m=%s max_allowed_m=%s",
+        shortest_distance,
+        max_allowed_distance,
+    )
 
     def _best_under_limit(routes):
         best = None
@@ -129,6 +147,12 @@ def plan_relaxed_route_with_waypoints(
     dest_latlng = destination_latlng
 
     for _ in range(max_waypoints):
+        logger.debug(
+            "Waypoint iteration start current_waypoints=%s current_best_stress=%s current_best_distance_m=%s",
+            len(chosen_waypoints),
+            current_best.get("stress"),
+            current_best.get("distance"),
+        )
         candidates = _candidate_circle_points(
             current_latlng,
             dest_latlng,
@@ -146,10 +170,17 @@ def plan_relaxed_route_with_waypoints(
 
             # Evaluate full route with the proposed additional waypoint(s)
             trial_waypoints = chosen_waypoints + [wp]
-            trial_routes = get_routes(origin, destination, waypoints=trial_waypoints)
+            trial_routes = get_routes(origin, destination, waypoints=trial_waypoints, travelmode=travelmode)
             trial_best = _best_under_limit(trial_routes)
             if trial_best is None:
                 continue
+
+            logger.debug(
+                "Candidate evaluated waypoint=%s trial_stress=%s trial_distance_m=%s",
+                wp,
+                trial_best.get("stress"),
+                trial_best.get("distance"),
+            )
 
             # Stress-first improvement; use distance as tie-breaker.
             if _is_better(
@@ -164,10 +195,18 @@ def plan_relaxed_route_with_waypoints(
                 best_candidate_waypoints = trial_waypoints
 
         if not improved:
+            logger.info("No improving candidate found; stopping waypoint search")
             break
 
         chosen_waypoints = best_candidate_waypoints
         current_latlng = best_candidate
+
+        logger.info(
+            "Accepted waypoint_count=%s best_stress=%s best_distance_m=%s",
+            len(chosen_waypoints),
+            current_best.get("stress"),
+            current_best.get("distance"),
+        )
 
     current_best["waypoints"] = chosen_waypoints
     # Useful for debugging/printing.
